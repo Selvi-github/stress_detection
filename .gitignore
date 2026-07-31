@@ -1,0 +1,27 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Database files & logs
+data/*.db
+*.log
+
+# Generated reports
+reports/*.pdf
+reports/*.png
+
+# Presentation helper files
+create_presentation.py
+Facial_Stress_Detection_Presentation.pptx
+
+# IDE & System files
+.vscode/
+.idea/
+.DS_Store

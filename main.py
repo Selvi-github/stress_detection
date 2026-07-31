@@ -1,0 +1,186 @@
+import cv2
+import threading
+import time
+import sys
+import numpy as np
+
+from src.detection import FaceDetector
+from src.landmarks import LandmarkExtractor
+from src.rppg import RPPGEngine
+from src.behavioral import BehavioralFeaturesExtractor
+from src.emotion import EmotionAnalyzer
+from src.features import FeatureFusion
+from src.stress_classifier import StressClassifier
+from src.database import DatabaseManager
+from src.report_generator import ReportGenerator
+from src.ui import StressDashboard
+
+class StressDetectionApp:
+    def __init__(self):
+        # Initialize Core Vision
+        self.detector = FaceDetector()
+        self.landmarks_extractor = LandmarkExtractor()
+        
+        # Initialize Engines
+        self.rppg = RPPGEngine(fps=30, window_size_sec=10)
+        self.behavioral = BehavioralFeaturesExtractor(fps=30)
+        self.emotion_analyzer = EmotionAnalyzer()
+        
+        # Initialize ML & Fusion
+        self.fusion = FeatureFusion()
+        self.classifier = StressClassifier()
+        
+        # Initialize DB & Reports
+        self.db = DatabaseManager()
+        self.session_id = self.db.start_session("Employee_Current")
+        self.report_gen = ReportGenerator()
+        
+        # Initialize UI
+        self.ui = StressDashboard(on_closing_callback=self.stop, end_session_callback=self.end_session)
+        
+        # Video Capture
+        self.cap = cv2.VideoCapture(0)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        
+        self.running = True
+        self.processing_thread = threading.Thread(target=self.process_loop)
+        
+        # To store latest metrics for UI
+        self.latest_frame = None
+        self.latest_signal = []
+        self.latest_metrics = {
+            'hr': 0.0, 'hrv': 0.0, 'blinks': 0, 'yawns': 0, 
+            'emotion': 'Neutral', 'stress_score': 0.0, 'stress_level': 'Low'
+        }
+        self.latest_feature_vector = None
+        self.feature_names = self.fusion.get_feature_names()
+        
+        # DB Logging Control
+        self.last_db_log = time.time()
+        self.db_log_interval = 2.0 # Log every 2 seconds
+
+    def process_loop(self):
+        while self.running:
+            ret, frame = self.cap.read()
+            if not ret:
+                time.sleep(0.01)
+                continue
+                
+            display_frame = frame.copy()
+            
+            # 1. Face Detection & Tracking
+            tracked_faces = self.detector.process(frame)
+            
+            # For simplicity, we process only the first detected face
+            if tracked_faces:
+                object_id, data = list(tracked_faces.items())[0]
+                x, y, w, h = data['bbox']
+                
+                # Draw BBox
+                cv2.rectangle(display_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                cv2.putText(display_frame, f"ID: {object_id}", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                
+                # 2. Landmarks & ROI
+                landmarks, masks = self.landmarks_extractor.process(frame, face_bbox=(x, y, w, h))
+                
+                if landmarks and masks:
+                    # Draw landmarks
+                    for pt in landmarks:
+                        cv2.circle(display_frame, pt, 1, (0, 0, 255), -1)
+                    
+                    # 3. rPPG
+                    # Combine forehead and cheek ROIs for rPPG signal
+                    mask_comb = cv2.bitwise_or(masks['forehead'], masks['left_cheek'])
+                    mask_comb = cv2.bitwise_or(mask_comb, masks['right_cheek'])
+                    rgb_mean = self.landmarks_extractor.get_roi_mean_color(frame, mask_comb)
+                    
+                    if np.any(rgb_mean):
+                        self.rppg.add_frame_mean(rgb_mean)
+                        
+                    hr, hrv, filtered_sig = self.rppg.estimate_heart_rate(method='POS')
+                    self.latest_signal = filtered_sig
+                    
+                    # 4. Behavioral
+                    behav_metrics = self.behavioral.update(landmarks, frame.shape)
+                    
+                    # 5. Emotion
+                    emotion, emotion_probs = self.emotion_analyzer.analyze(landmarks)
+                    
+                    # 6. Feature Fusion
+                    feature_vector = self.fusion.fuse(hr, hrv, behav_metrics, emotion_probs)
+                    self.latest_feature_vector = feature_vector
+                    
+                    # 7. Stress Classification
+                    score, level, feature_importance = self.classifier.predict(feature_vector, self.feature_names)
+                    
+                    # Update metrics store
+                    self.latest_metrics = {
+                        'hr': hr, 'hrv': hrv, 
+                        'blinks': behav_metrics['blinks'] if behav_metrics else 0,
+                        'yawns': behav_metrics['yawns'] if behav_metrics else 0,
+                        'emotion': emotion, 'stress_score': score, 'stress_level': level
+                    }
+                    
+                    # Database Logging
+                    if time.time() - self.last_db_log > self.db_log_interval:
+                        self.db.log_metrics(
+                            self.session_id, hr, hrv, 
+                            self.latest_metrics['blinks'], self.latest_metrics['yawns'],
+                            emotion, score, level
+                        )
+                        self.last_db_log = time.time()
+            else:
+                # No face detected
+                cv2.putText(display_frame, "No Face Detected", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                
+            self.latest_frame = display_frame
+            time.sleep(0.01) # Small sleep to prevent CPU hogging
+
+    def ui_update_loop(self):
+        """
+        Periodically updates the Tkinter UI from the processing thread data.
+        """
+        if self.latest_frame is not None:
+            self.ui.update_video(self.latest_frame)
+            
+        self.ui.update_metrics(**self.latest_metrics)
+        self.ui.update_plot(self.latest_signal)
+        
+        # Schedule next update
+        if self.running:
+            self.ui.after(30, self.ui_update_loop)
+
+    def start(self):
+        self.processing_thread.start()
+        self.ui.after(30, self.ui_update_loop)
+        self.ui.mainloop()
+
+    def end_session(self):
+        print("Ending session and generating report...")
+        self.db.end_session(self.session_id)
+        
+        # Generate SHAP Plot for the last recorded feature vector
+        shap_plot_path = None
+        if self.latest_feature_vector is not None:
+            shap_plot_path = self.classifier.generate_shap_plot(self.latest_feature_vector, self.feature_names)
+            
+        # Get metrics DataFrame
+        df = self.db.get_session_data(self.session_id)
+        
+        # Generate Report
+        report_path = self.report_gen.generate_report(self.session_id, df, shap_plot_path)
+        print(f"Report generated: {report_path}")
+        
+        self.stop()
+
+    def stop(self):
+        self.running = False
+        self.cap.release()
+        self.db.close()
+        self.ui.destroy()
+        sys.exit(0)
+
+if __name__ == "__main__":
+    app = StressDetectionApp()
+    app.start()
