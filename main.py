@@ -47,9 +47,8 @@ class StressDetectionApp:
         # Source State
         self.source_type = "webcam" # "webcam", "video", or "image"
         self.static_image = None
-        self.cap = cv2.VideoCapture(0)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.cap = None
+        self.open_webcam_capture()
         
         self.running = True
         self.processing_thread = threading.Thread(target=self.process_loop)
@@ -68,30 +67,46 @@ class StressDetectionApp:
         self.last_db_log = time.time()
         self.db_log_interval = 2.0 # Log every 2 seconds
 
+    def open_webcam_capture(self):
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+            
+        # Try DirectShow backend first on Windows for instant capture, fallback to default
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(0)
+            
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        
+        if cap.isOpened():
+            self.cap = cap
+            return True
+        return False
+
     def set_image_source(self, image_path):
         img = cv2.imread(image_path)
         if img is not None:
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
             self.static_image = img
             self.source_type = "image"
             print(f"Switched source to Image: {image_path}")
 
     def set_video_source(self, video_path):
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
         cap = cv2.VideoCapture(video_path)
         if cap.isOpened():
-            if self.cap is not None:
-                self.cap.release()
             self.cap = cap
             self.source_type = "video"
             print(f"Switched source to Video: {video_path}")
 
     def set_webcam_source(self):
-        cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        if cap.isOpened():
-            if self.cap is not None:
-                self.cap.release()
-            self.cap = cap
+        if self.open_webcam_capture():
             self.source_type = "webcam"
             print("Switched source to Webcam")
 
