@@ -51,17 +51,19 @@ class ReportGenerator:
         c.drawString(70, height - 260, f"- Total Yawns: {total_yawns}")
         c.drawString(70, height - 280, f"- Dominant Emotion: {dominant_emotion}")
         
-        # Stress Score
+        # Stress Classification (Medical Clinical Alignment)
         c.setFont("Helvetica-Bold", 16)
         c.drawString(50, height - 330, f"Average Stress Score: {avg_stress:.1f} / 100")
         
-        level = "Low"
+        level = "Normal"
         if avg_stress >= 66:
-            level = "High"
+            level = "Chronic Stress"
         elif avg_stress >= 33:
-            level = "Moderate"
+            level = "Acute Stress"
             
-        c.drawString(50, height - 360, f"Overall Stress Level: {level}")
+        c.drawString(50, height - 360, f"Clinical Assessment: {level}")
+        c.setFont("Helvetica-Oblique", 10)
+        c.drawString(50, height - 380, "*Acute = Short-term situational reaction; Chronic = Persistent abnormal behavior over time")
         
         # SHAP Plot
         if shap_plot_path and os.path.exists(shap_plot_path):

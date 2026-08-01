@@ -100,10 +100,10 @@ class StressDashboard(ctk.CTk):
         self.stress_val_label.configure(text=f"Stress Score: {stress_score:.1f}")
         self.stress_level_label.configure(text=f"Level: {stress_level}")
         
-        if stress_level == "High":
+        if stress_level == "Chronic Stress":
             self.stress_val_label.configure(text_color="red")
             self.stress_level_label.configure(text_color="red")
-        elif stress_level == "Moderate":
+        elif stress_level == "Acute Stress":
             self.stress_val_label.configure(text_color="orange")
             self.stress_level_label.configure(text_color="orange")
         else:

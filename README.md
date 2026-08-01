@@ -8,9 +8,9 @@ This is a real-time, research-grade stress detection system that estimates physi
 - **Remote PPG (rPPG)**: Estimates Heart Rate (BPM) and HRV from facial micro-color changes using the POS and GREEN methods.
 - **Behavioral Analysis**: Calculates Blink Rate (EAR), Yawning (MAR), and Head Pose (Pitch, Yaw, Roll).
 - **Emotion Analysis**: Analyzes facial muscle tension to estimate emotional state.
-- **Stress Classification**: Fuses multi-modal features and uses a Random Forest Regressor to output a Stress Score (0-100).
+- **Stress Classification & Clinical Triage**: Fuses multi-modal features and uses a Random Forest Regressor combined with temporal persistence tracking to classify stress into clinical categories: **Normal / Baseline**, **Acute Stress** (short-term situational reaction), and **Chronic Stress** (persistent abnormal behaviors over time).
 - **Explainable AI (SHAP)**: Explains the stress prediction by showing which features contributed the most.
-- **Medical Report Generation**: Outputs a PDF report summarizing the session.
+- **Medical Report Generation**: Outputs a clinical PDF report summarizing physiological, behavioral, and diagnostic findings.
 
 ## Installation
 
