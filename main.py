@@ -197,7 +197,12 @@ class StressDetectionApp:
                         self.last_db_log = time.time()
             else:
                 # No face detected
-                cv2.putText(display_frame, "No Face Detected", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                mean_b = np.mean(display_frame)
+                if mean_b < 2.0 and self.source_type == "webcam":
+                    cv2.putText(display_frame, "Camera Lens Blocked / Shutter Closed!", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    cv2.putText(display_frame, "Please slide open laptop camera privacy switch", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                else:
+                    cv2.putText(display_frame, "No Face Detected", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 
             self.latest_frame = display_frame
             time.sleep(0.01) # Small sleep to prevent CPU hogging
