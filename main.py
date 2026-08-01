@@ -36,9 +36,17 @@ class StressDetectionApp:
         self.report_gen = ReportGenerator()
         
         # Initialize UI
-        self.ui = StressDashboard(on_closing_callback=self.stop, end_session_callback=self.end_session)
+        self.ui = StressDashboard(
+            on_closing_callback=self.stop,
+            end_session_callback=self.end_session,
+            upload_img_callback=self.set_image_source,
+            upload_vid_callback=self.set_video_source,
+            webcam_callback=self.set_webcam_source
+        )
         
-        # Video Capture
+        # Source State
+        self.source_type = "webcam" # "webcam", "video", or "image"
+        self.static_image = None
         self.cap = cv2.VideoCapture(0)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -51,7 +59,7 @@ class StressDetectionApp:
         self.latest_signal = []
         self.latest_metrics = {
             'hr': 0.0, 'hrv': 0.0, 'blinks': 0, 'yawns': 0, 
-            'emotion': 'Neutral', 'stress_score': 0.0, 'stress_level': 'Low'
+            'emotion': 'Neutral', 'stress_score': 0.0, 'stress_level': 'Normal'
         }
         self.latest_feature_vector = None
         self.feature_names = self.fusion.get_feature_names()
@@ -60,12 +68,54 @@ class StressDetectionApp:
         self.last_db_log = time.time()
         self.db_log_interval = 2.0 # Log every 2 seconds
 
+    def set_image_source(self, image_path):
+        img = cv2.imread(image_path)
+        if img is not None:
+            self.static_image = img
+            self.source_type = "image"
+            print(f"Switched source to Image: {image_path}")
+
+    def set_video_source(self, video_path):
+        cap = cv2.VideoCapture(video_path)
+        if cap.isOpened():
+            if self.cap is not None:
+                self.cap.release()
+            self.cap = cap
+            self.source_type = "video"
+            print(f"Switched source to Video: {video_path}")
+
+    def set_webcam_source(self):
+        cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        if cap.isOpened():
+            if self.cap is not None:
+                self.cap.release()
+            self.cap = cap
+            self.source_type = "webcam"
+            print("Switched source to Webcam")
+
     def process_loop(self):
         while self.running:
-            ret, frame = self.cap.read()
-            if not ret:
-                time.sleep(0.01)
-                continue
+            if self.source_type == "image":
+                if self.static_image is None:
+                    time.sleep(0.05)
+                    continue
+                frame = self.static_image.copy()
+                ret = True
+            else:
+                if self.cap is None or not self.cap.isOpened():
+                    time.sleep(0.05)
+                    continue
+                ret, frame = self.cap.read()
+                if not ret:
+                    if self.source_type == "video":
+                        # Loop video continuously
+                        self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        ret, frame = self.cap.read()
+                    if not ret:
+                        time.sleep(0.05)
+                        continue
                 
             display_frame = frame.copy()
             

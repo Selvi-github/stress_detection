@@ -4,9 +4,10 @@ from PIL import Image, ImageTk
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
+from tkinter import filedialog
 
 class StressDashboard(ctk.CTk):
-    def __init__(self, on_closing_callback=None, end_session_callback=None):
+    def __init__(self, on_closing_callback=None, end_session_callback=None, upload_img_callback=None, upload_vid_callback=None, webcam_callback=None):
         super().__init__()
 
         self.title("AI-Based Non-Contact Facial Stress Detection")
@@ -14,6 +15,9 @@ class StressDashboard(ctk.CTk):
         
         self.on_closing_callback = on_closing_callback
         self.end_session_callback = end_session_callback
+        self.upload_img_callback = upload_img_callback
+        self.upload_vid_callback = upload_vid_callback
+        self.webcam_callback = webcam_callback
         
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
         
@@ -61,9 +65,22 @@ class StressDashboard(ctk.CTk):
         self.stress_level_label = ctk.CTkLabel(self.stress_frame, text="Level: --", font=ctk.CTkFont(size=18))
         self.stress_level_label.pack(pady=5)
         
+        # Source Control Buttons Panel
+        self.controls_frame = ctk.CTkFrame(self.metrics_frame, fg_color="transparent")
+        self.controls_frame.pack(pady=10, fill="x")
+
+        self.btn_img = ctk.CTkButton(self.controls_frame, text="📁 Upload Image", width=110, command=self._upload_image)
+        self.btn_img.pack(side="left", padx=3)
+
+        self.btn_vid = ctk.CTkButton(self.controls_frame, text="🎥 Upload Video", width=110, command=self._upload_video)
+        self.btn_vid.pack(side="left", padx=3)
+
+        self.btn_cam = ctk.CTkButton(self.controls_frame, text="📷 Webcam", width=80, command=self._use_webcam)
+        self.btn_cam.pack(side="left", padx=3)
+
         # End Session Button
-        self.end_btn = ctk.CTkButton(self.metrics_frame, text="End Session & Generate Report", command=self._end_session)
-        self.end_btn.pack(side="bottom", pady=20)
+        self.end_btn = ctk.CTkButton(self.metrics_frame, text="End Session & Generate Report", fg_color="#C0392B", hover_color="#922B21", command=self._end_session)
+        self.end_btn.pack(side="bottom", pady=15)
 
         # Plot Panel
         self.plot_frame = ctk.CTkFrame(self)
@@ -120,6 +137,26 @@ class StressDashboard(ctk.CTk):
             self.ax.plot(signal_data, color='blue')
             
         self.canvas.draw()
+
+    def _upload_image(self):
+        file_path = filedialog.askopenfilename(
+            title="Select Image File",
+            filetypes=[("Image Files", "*.jpg *.jpeg *.png *.bmp"), ("All Files", "*.*")]
+        )
+        if file_path and self.upload_img_callback:
+            self.upload_img_callback(file_path)
+
+    def _upload_video(self):
+        file_path = filedialog.askopenfilename(
+            title="Select Video File",
+            filetypes=[("Video Files", "*.mp4 *.avi *.mov *.mkv"), ("All Files", "*.*")]
+        )
+        if file_path and self.upload_vid_callback:
+            self.upload_vid_callback(file_path)
+
+    def _use_webcam(self):
+        if self.webcam_callback:
+            self.webcam_callback()
 
     def _end_session(self):
         if self.end_session_callback:
