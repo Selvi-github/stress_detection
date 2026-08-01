@@ -93,6 +93,7 @@ class StressDetectionApp:
                 self.cap = None
             self.static_image = img
             self.source_type = "image"
+            self.classifier.clear_history()
             print(f"Switched source to Image: {image_path}")
 
     def set_video_source(self, video_path):
@@ -103,11 +104,13 @@ class StressDetectionApp:
         if cap.isOpened():
             self.cap = cap
             self.source_type = "video"
+            self.classifier.clear_history()
             print(f"Switched source to Video: {video_path}")
 
     def set_webcam_source(self):
         if self.open_webcam_capture():
             self.source_type = "webcam"
+            self.classifier.clear_history()
             print("Switched source to Webcam")
 
     def process_loop(self):
@@ -154,17 +157,20 @@ class StressDetectionApp:
                     for pt in landmarks:
                         cv2.circle(display_frame, pt, 1, (0, 0, 255), -1)
                     
-                    # 3. rPPG
-                    # Combine forehead and cheek ROIs for rPPG signal
-                    mask_comb = cv2.bitwise_or(masks['forehead'], masks['left_cheek'])
-                    mask_comb = cv2.bitwise_or(mask_comb, masks['right_cheek'])
-                    rgb_mean = self.landmarks_extractor.get_roi_mean_color(frame, mask_comb)
-                    
-                    if np.any(rgb_mean):
-                        self.rppg.add_frame_mean(rgb_mean)
+                    # 3. rPPG (Only for Video Streams / Webcam, not static single photos)
+                    if self.source_type != "image":
+                        mask_comb = cv2.bitwise_or(masks['forehead'], masks['left_cheek'])
+                        mask_comb = cv2.bitwise_or(mask_comb, masks['right_cheek'])
+                        rgb_mean = self.landmarks_extractor.get_roi_mean_color(frame, mask_comb)
                         
-                    hr, hrv, filtered_sig = self.rppg.estimate_heart_rate(method='POS')
-                    self.latest_signal = filtered_sig
+                        if np.any(rgb_mean):
+                            self.rppg.add_frame_mean(rgb_mean)
+                            
+                        hr, hrv, filtered_sig = self.rppg.estimate_heart_rate(method='POS')
+                        self.latest_signal = filtered_sig
+                    else:
+                        hr, hrv = 0.0, 0.0
+                        self.latest_signal = []
                     
                     # 4. Behavioral
                     behav_metrics = self.behavioral.update(landmarks, frame.shape)

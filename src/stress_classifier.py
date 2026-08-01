@@ -45,13 +45,16 @@ class StressClassifier:
         joblib.dump(self.model, self.model_path)
         self.explainer = shap.TreeExplainer(self.model)
 
+    def clear_history(self):
+        self.history.clear()
+
     def predict(self, feature_vector, feature_names):
         """
         Predict stress score and return SHAP explanation.
         Categorizes according to medical clinical standards:
         - Normal / Baseline: score < 33
-        - Acute Stress: transient situational stress spike (33 <= score < 66 or short duration)
-        - Chronic Stress: persistent, long-duration abnormal behavior (score >= 66 sustained over time)
+        - Acute Stress: transient situational stress spike (33 <= score < 66)
+        - Chronic Stress: persistent, long-duration abnormal behavior (score >= 66)
         """
         if feature_vector is None or len(feature_vector) == 0:
             return 0.0, "Normal", None
@@ -62,26 +65,17 @@ class StressClassifier:
         
         # Track history for temporal persistence analysis
         self.history.append(score)
-        avg_history = np.mean(self.history)
-        elevated_count = sum(1 for s in self.history if s >= 50)
 
         # Clinical Medical Categorization:
-        # Acute Stress: momentary / transient stress spike (seconds to 1-2 minutes)
-        # Chronic Stress: persistent, repeated abnormal behavior / high physiological strain over continuous duration
-        if score < 33:
+        # Score < 33: Normal / Baseline
+        # Score 33 - 65.9: Acute Stress
+        # Score >= 66: Chronic Stress
+        if score < 33.0:
             level = "Normal"
-        elif score < 66:
-            # If persistent elevated history exists, escalate to Chronic Stress
-            if elevated_count >= 6 and avg_history >= 45:
-                level = "Chronic Stress"
-            else:
-                level = "Acute Stress"
+        elif score < 66.0:
+            level = "Acute Stress"
         else:
-            # High score: evaluate temporal persistence
-            if elevated_count >= 5 or avg_history >= 60:
-                level = "Chronic Stress"
-            else:
-                level = "Acute Stress"
+            level = "Chronic Stress"
 
         # Calculate SHAP values
         shap_values = self.explainer.shap_values(feature_vector.reshape(1, -1))

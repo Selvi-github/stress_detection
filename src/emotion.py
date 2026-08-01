@@ -75,8 +75,6 @@ class EmotionAnalyzer:
         if not landmarks or len(landmarks) < 350:
             return "Neutral", {e: (0.8 if e == 'Neutral' else 0.03) for e in self.emotions}
 
-        features = self._extract_features(landmarks)
-
         # Geometric Action Unit rules for robust real-time facial expression analysis
         face_scale = np.linalg.norm(np.array(landmarks[10]) - np.array(landmarks[152])) + 1e-6
         
@@ -103,34 +101,21 @@ class EmotionAnalyzer:
         elif smile_curvature < -0.015 and mouth_width > 0.22:
             # Mouth corners pulled UP significantly relative to lips -> Happy
             emotion = "Happy"
-        elif brow_dist < 0.16 and smile_curvature > 0.005:
-            # Furrowed brows + downward mouth -> Sad / Distressed
+        elif brow_dist < 0.18 and (smile_curvature > 0.002 or mouth_ratio < 0.15):
+            # Furrowed brows + compressed/downward mouth -> Sad / Distressed
             emotion = "Sad"
-        elif brow_dist < 0.16 and brow_height > 0.08:
+        elif brow_dist < 0.18 and brow_height > 0.06:
             # Furrowed brows + wide eyes / elevated brows -> Fear / Anxious
             emotion = "Fear"
-        elif brow_dist < 0.15:
+        elif brow_dist < 0.17:
             # Squeezed brows -> Angry / Distressed
             emotion = "Angry"
-        elif smile_curvature > 0.01:
+        elif smile_curvature > 0.008:
             # Downward mouth corners -> Sad
             emotion = "Sad"
         else:
             emotion = "Neutral"
 
-        # Predict using model if available, blending with rule-based features for stability
-        if self.model is not None and features is not None:
-            try:
-                preds = self.model.predict_proba(features)[0]
-                # Boost probability of geometrically identified emotion
-                probs = {self.emotions[i]: float(preds[i]) for i in range(len(self.emotions))}
-                probs[emotion] = max(probs.get(emotion, 0.0), 0.65)
-                # Normalize probabilities
-                total = sum(probs.values())
-                probs = {k: v / total for k, v in probs.items()}
-                return emotion, probs
-            except Exception:
-                pass
-
-        probs = {e: (0.65 if e == emotion else 0.05) for e in self.emotions}
+        probs = {e: 0.04 for e in self.emotions}
+        probs[emotion] = 0.76
         return emotion, probs
