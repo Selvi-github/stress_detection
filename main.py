@@ -41,13 +41,19 @@ class StressDetectionApp:
             end_session_callback=self.end_session,
             upload_img_callback=self.set_image_source,
             upload_vid_callback=self.set_video_source,
-            webcam_callback=self.set_webcam_source
+            webcam_callback=self.set_webcam_source,
+            dual_phone_callback=self.set_dual_phone_source
         )
         
         # Source State
-        self.source_type = "webcam" # "webcam", "video", or "image"
+        self.source_type = "webcam" # "webcam", "video", "image", or "dual_phone"
         self.static_image = None
         self.cap = None
+        self.cap1 = None
+        self.cap2 = None
+        self.phone_url1 = "http://192.168.1.4:8080/video"
+        self.phone_url2 = "http://192.168.1.3:8080/video"
+        
         self.open_webcam_capture()
         
         self.running = True
@@ -67,10 +73,19 @@ class StressDetectionApp:
         self.last_db_log = time.time()
         self.db_log_interval = 2.0 # Log every 2 seconds
 
-    def open_webcam_capture(self):
+    def release_all_captures(self):
         if self.cap is not None:
             self.cap.release()
             self.cap = None
+        if self.cap1 is not None:
+            self.cap1.release()
+            self.cap1 = None
+        if self.cap2 is not None:
+            self.cap2.release()
+            self.cap2 = None
+
+    def open_webcam_capture(self):
+        self.release_all_captures()
             
         # Try DirectShow backend first on Windows for instant capture, fallback to default
         cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
@@ -88,18 +103,14 @@ class StressDetectionApp:
     def set_image_source(self, image_path):
         img = cv2.imread(image_path)
         if img is not None:
-            if self.cap is not None:
-                self.cap.release()
-                self.cap = None
+            self.release_all_captures()
             self.static_image = img
             self.source_type = "image"
             self.classifier.clear_history()
             print(f"Switched source to Image: {image_path}")
 
     def set_video_source(self, video_path):
-        if self.cap is not None:
-            self.cap.release()
-            self.cap = None
+        self.release_all_captures()
         cap = cv2.VideoCapture(video_path)
         if cap.isOpened():
             self.cap = cap
@@ -113,14 +124,132 @@ class StressDetectionApp:
             self.classifier.clear_history()
             print("Switched source to Webcam")
 
+    def set_dual_phone_source(self):
+        self.release_all_captures()
+        print(f"Connecting to Phone 1 ({self.phone_url1}) and Phone 2 ({self.phone_url2})...")
+        cap1 = cv2.VideoCapture(self.phone_url1)
+        cap2 = cv2.VideoCapture(self.phone_url2)
+        
+        if cap1.isOpened() and cap2.isOpened():
+            self.cap1 = cap1
+            self.cap2 = cap2
+            self.source_type = "dual_phone"
+            self.classifier.clear_history()
+            print("SUCCESS: Dual Phone Cameras Connected!")
+        else:
+            print("Error connecting to one or both phone cameras. Retrying single fallback...")
+            if cap1.isOpened():
+                self.cap = cap1
+                self.source_type = "video"
+            elif cap2.isOpened():
+                self.cap = cap2
+                self.source_type = "video"
+
+    def process_single_frame(self, frame, cam_label="Camera"):
+        display_frame = frame.copy()
+        cv2.putText(display_frame, f"📷 {cam_label}", (15, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+        
+        # 1. Face Detection & Tracking
+        tracked_faces = self.detector.process(frame)
+        
+        if tracked_faces:
+            object_id, data = list(tracked_faces.items())[0]
+            x, y, w, h = data['bbox']
+            
+            # Draw BBox
+            cv2.rectangle(display_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            cv2.putText(display_frame, f"ID: {object_id}", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            
+            # 2. Landmarks & ROI
+            landmarks, masks = self.landmarks_extractor.process(frame, face_bbox=(x, y, w, h))
+            
+            if landmarks and masks:
+                # Draw landmarks
+                for pt in landmarks:
+                    cv2.circle(display_frame, pt, 1, (0, 0, 255), -1)
+                
+                # 3. rPPG (Only for Video Streams / Webcam, not static single photos)
+                if self.source_type != "image":
+                    mask_comb = cv2.bitwise_or(masks['forehead'], masks['left_cheek'])
+                    mask_comb = cv2.bitwise_or(mask_comb, masks['right_cheek'])
+                    rgb_mean = self.landmarks_extractor.get_roi_mean_color(frame, mask_comb)
+                    
+                    if np.any(rgb_mean):
+                        self.rppg.add_frame_mean(rgb_mean)
+                        
+                    hr, hrv, filtered_sig = self.rppg.estimate_heart_rate(method='POS')
+                    self.latest_signal = filtered_sig
+                else:
+                    hr, hrv = 0.0, 0.0
+                    self.latest_signal = []
+                
+                # 4. Behavioral
+                behav_metrics = self.behavioral.update(landmarks, frame.shape)
+                
+                # 5. Emotion
+                emotion, emotion_probs = self.emotion_analyzer.analyze(landmarks)
+                
+                # 6. Feature Fusion
+                feature_vector = self.fusion.fuse(hr, hrv, behav_metrics, emotion_probs)
+                self.latest_feature_vector = feature_vector
+                
+                # 7. Stress Classification
+                score, level, feature_importance = self.classifier.predict(feature_vector, self.feature_names)
+                
+                # Overlay results on frame
+                level_color = (0, 255, 0) if level == "Normal" else ((0, 165, 255) if level == "Acute Stress" else (0, 0, 255))
+                cv2.putText(display_frame, f"Stress: {score:.1f} ({level})", (x, y+h+25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, level_color, 2)
+                
+                # Update metrics store
+                self.latest_metrics = {
+                    'hr': hr, 'hrv': hrv, 
+                    'blinks': behav_metrics['blinks'] if behav_metrics else 0,
+                    'yawns': behav_metrics['yawns'] if behav_metrics else 0,
+                    'emotion': emotion, 'stress_score': score, 'stress_level': level
+                }
+                
+                # Database Logging
+                if time.time() - self.last_db_log > self.db_log_interval:
+                    self.db.log_metrics(
+                        self.session_id, hr, hrv, 
+                        self.latest_metrics['blinks'], self.latest_metrics['yawns'],
+                        emotion, score, level
+                    )
+                    self.last_db_log = time.time()
+        else:
+            mean_b = np.mean(display_frame)
+            if mean_b < 2.0 and self.source_type == "webcam":
+                cv2.putText(display_frame, "Camera Lens Blocked / Shutter Closed!", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            else:
+                cv2.putText(display_frame, "No Face Detected", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                
+        return display_frame
+
     def process_loop(self):
         while self.running:
-            if self.source_type == "image":
+            if self.source_type == "dual_phone":
+                if self.cap1 is None or self.cap2 is None or not self.cap1.isOpened() or not self.cap2.isOpened():
+                    time.sleep(0.05)
+                    continue
+                ret1, frame1 = self.cap1.read()
+                ret2, frame2 = self.cap2.read()
+                if not ret1 or not ret2 or frame1 is None or frame2 is None:
+                    time.sleep(0.02)
+                    continue
+                
+                frame1 = cv2.resize(frame1, (640, 480))
+                frame2 = cv2.resize(frame2, (640, 480))
+                
+                f1_proc = self.process_single_frame(frame1, cam_label="Phone 1 (192.168.1.4)")
+                f2_proc = self.process_single_frame(frame2, cam_label="Phone 2 (192.168.1.3)")
+                
+                display_frame = np.hstack([f1_proc, f2_proc])
+            elif self.source_type == "image":
                 if self.static_image is None:
                     time.sleep(0.05)
                     continue
-                frame = self.static_image.copy()
-                ret = True
+                frame = cv2.resize(self.static_image.copy(), (640, 480))
+                display_frame = self.process_single_frame(frame, cam_label="Uploaded Image")
             else:
                 if self.cap is None or not self.cap.isOpened():
                     time.sleep(0.05)
@@ -128,90 +257,17 @@ class StressDetectionApp:
                 ret, frame = self.cap.read()
                 if not ret:
                     if self.source_type == "video":
-                        # Loop video continuously
                         self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         ret, frame = self.cap.read()
                     if not ret:
                         time.sleep(0.05)
                         continue
-                
-            display_frame = frame.copy()
-            
-            # 1. Face Detection & Tracking
-            tracked_faces = self.detector.process(frame)
-            
-            # For simplicity, we process only the first detected face
-            if tracked_faces:
-                object_id, data = list(tracked_faces.items())[0]
-                x, y, w, h = data['bbox']
-                
-                # Draw BBox
-                cv2.rectangle(display_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                cv2.putText(display_frame, f"ID: {object_id}", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                
-                # 2. Landmarks & ROI
-                landmarks, masks = self.landmarks_extractor.process(frame, face_bbox=(x, y, w, h))
-                
-                if landmarks and masks:
-                    # Draw landmarks
-                    for pt in landmarks:
-                        cv2.circle(display_frame, pt, 1, (0, 0, 255), -1)
-                    
-                    # 3. rPPG (Only for Video Streams / Webcam, not static single photos)
-                    if self.source_type != "image":
-                        mask_comb = cv2.bitwise_or(masks['forehead'], masks['left_cheek'])
-                        mask_comb = cv2.bitwise_or(mask_comb, masks['right_cheek'])
-                        rgb_mean = self.landmarks_extractor.get_roi_mean_color(frame, mask_comb)
                         
-                        if np.any(rgb_mean):
-                            self.rppg.add_frame_mean(rgb_mean)
-                            
-                        hr, hrv, filtered_sig = self.rppg.estimate_heart_rate(method='POS')
-                        self.latest_signal = filtered_sig
-                    else:
-                        hr, hrv = 0.0, 0.0
-                        self.latest_signal = []
-                    
-                    # 4. Behavioral
-                    behav_metrics = self.behavioral.update(landmarks, frame.shape)
-                    
-                    # 5. Emotion
-                    emotion, emotion_probs = self.emotion_analyzer.analyze(landmarks)
-                    
-                    # 6. Feature Fusion
-                    feature_vector = self.fusion.fuse(hr, hrv, behav_metrics, emotion_probs)
-                    self.latest_feature_vector = feature_vector
-                    
-                    # 7. Stress Classification
-                    score, level, feature_importance = self.classifier.predict(feature_vector, self.feature_names)
-                    
-                    # Update metrics store
-                    self.latest_metrics = {
-                        'hr': hr, 'hrv': hrv, 
-                        'blinks': behav_metrics['blinks'] if behav_metrics else 0,
-                        'yawns': behav_metrics['yawns'] if behav_metrics else 0,
-                        'emotion': emotion, 'stress_score': score, 'stress_level': level
-                    }
-                    
-                    # Database Logging
-                    if time.time() - self.last_db_log > self.db_log_interval:
-                        self.db.log_metrics(
-                            self.session_id, hr, hrv, 
-                            self.latest_metrics['blinks'], self.latest_metrics['yawns'],
-                            emotion, score, level
-                        )
-                        self.last_db_log = time.time()
-            else:
-                # No face detected
-                mean_b = np.mean(display_frame)
-                if mean_b < 2.0 and self.source_type == "webcam":
-                    cv2.putText(display_frame, "Camera Lens Blocked / Shutter Closed!", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                    cv2.putText(display_frame, "Please slide open laptop camera privacy switch", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-                else:
-                    cv2.putText(display_frame, "No Face Detected", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                
+                frame = cv2.resize(frame, (640, 480))
+                display_frame = self.process_single_frame(frame, cam_label="Webcam / Video Feed")
+
             self.latest_frame = display_frame
-            time.sleep(0.01) # Small sleep to prevent CPU hogging
+            time.sleep(0.01)
 
     def ui_update_loop(self):
         """

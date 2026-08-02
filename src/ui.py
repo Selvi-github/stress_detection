@@ -7,27 +7,28 @@ import numpy as np
 from tkinter import filedialog
 
 class StressDashboard(ctk.CTk):
-    def __init__(self, on_closing_callback=None, end_session_callback=None, upload_img_callback=None, upload_vid_callback=None, webcam_callback=None):
+    def __init__(self, on_closing_callback=None, end_session_callback=None, upload_img_callback=None, upload_vid_callback=None, webcam_callback=None, dual_phone_callback=None):
         super().__init__()
 
-        self.title("AI-Based Non-Contact Facial Stress Detection")
-        self.geometry("1200x800")
+        self.title("AI-Based Non-Contact Facial Stress Detection System (Enterprise Multi-Camera Suite)")
+        self.geometry("1350x850")
         
         self.on_closing_callback = on_closing_callback
         self.end_session_callback = end_session_callback
         self.upload_img_callback = upload_img_callback
         self.upload_vid_callback = upload_vid_callback
         self.webcam_callback = webcam_callback
+        self.dual_phone_callback = dual_phone_callback
         
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
         
         # Configure grid layout
-        self.grid_columnconfigure(0, weight=2) # Video feed
+        self.grid_columnconfigure(0, weight=3) # Video feeds
         self.grid_columnconfigure(1, weight=1) # Metrics
         self.grid_rowconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
-        # Video Frame
+        # Video Frame Container
         self.video_frame = ctk.CTkFrame(self)
         self.video_frame.grid(row=0, column=0, rowspan=2, padx=10, pady=10, sticky="nsew")
         
@@ -38,7 +39,7 @@ class StressDashboard(ctk.CTk):
         self.metrics_frame = ctk.CTkFrame(self)
         self.metrics_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
         
-        ctk.CTkLabel(self.metrics_frame, text="Live Metrics", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=10)
+        ctk.CTkLabel(self.metrics_frame, text="Live Enterprise Metrics", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=10)
         
         self.hr_label = ctk.CTkLabel(self.metrics_frame, text="Heart Rate: -- BPM", font=ctk.CTkFont(size=16))
         self.hr_label.pack(pady=5)
@@ -57,7 +58,7 @@ class StressDashboard(ctk.CTk):
 
         # Stress Score Panel
         self.stress_frame = ctk.CTkFrame(self.metrics_frame, fg_color="transparent")
-        self.stress_frame.pack(pady=20, fill="x")
+        self.stress_frame.pack(pady=15, fill="x")
         
         self.stress_val_label = ctk.CTkLabel(self.stress_frame, text="Stress Score: --", font=ctk.CTkFont(size=24, weight="bold"))
         self.stress_val_label.pack(pady=5)
@@ -69,14 +70,20 @@ class StressDashboard(ctk.CTk):
         self.controls_frame = ctk.CTkFrame(self.metrics_frame, fg_color="transparent")
         self.controls_frame.pack(pady=10, fill="x")
 
-        self.btn_img = ctk.CTkButton(self.controls_frame, text="📁 Upload Image", width=110, command=self._upload_image)
-        self.btn_img.pack(side="left", padx=3)
+        self.btn_dual = ctk.CTkButton(self.controls_frame, text="📱 Dual Phone Cams", fg_color="#27AE60", hover_color="#1E8449", command=self._use_dual_phone)
+        self.btn_dual.pack(pady=3, fill="x")
 
-        self.btn_vid = ctk.CTkButton(self.controls_frame, text="🎥 Upload Video", width=110, command=self._upload_video)
-        self.btn_vid.pack(side="left", padx=3)
+        self.btn_sub_frame = ctk.CTkFrame(self.controls_frame, fg_color="transparent")
+        self.btn_sub_frame.pack(fill="x", pady=3)
 
-        self.btn_cam = ctk.CTkButton(self.controls_frame, text="📷 Webcam", width=80, command=self._use_webcam)
-        self.btn_cam.pack(side="left", padx=3)
+        self.btn_img = ctk.CTkButton(self.btn_sub_frame, text="📁 Upload Image", width=105, command=self._upload_image)
+        self.btn_img.pack(side="left", padx=2)
+
+        self.btn_vid = ctk.CTkButton(self.btn_sub_frame, text="🎥 Upload Video", width=105, command=self._upload_video)
+        self.btn_vid.pack(side="left", padx=2)
+
+        self.btn_cam = ctk.CTkButton(self.btn_sub_frame, text="📷 Laptop Cam", width=95, command=self._use_webcam)
+        self.btn_cam.pack(side="left", padx=2)
 
         # End Session Button
         self.end_btn = ctk.CTkButton(self.metrics_frame, text="End Session & Generate Report", fg_color="#C0392B", hover_color="#922B21", command=self._end_session)
@@ -153,6 +160,10 @@ class StressDashboard(ctk.CTk):
         )
         if file_path and self.upload_vid_callback:
             self.upload_vid_callback(file_path)
+
+    def _use_dual_phone(self):
+        if self.dual_phone_callback:
+            self.dual_phone_callback()
 
     def _use_webcam(self):
         if self.webcam_callback:
